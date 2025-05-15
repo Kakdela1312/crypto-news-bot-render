@@ -10,14 +10,14 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-# === ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ===
+# === ОКРУЖЕНИЕ ===
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHANNEL = os.environ.get("TELEGRAM_CHANNEL")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+APP_URL = os.environ.get("APP_URL")  # https://your-bot.onrender.com
 SENT_FILE = "sent_links.json"
-CHECK_INTERVAL = 600  # каждые 10 минут
+CHECK_INTERVAL = 600  # 10 минут
 
-# === СПИСОК RSS-ИСТОЧНИКОВ ===
 RSS_FEEDS = {
     "https://forklog.com/feed": "ru",
     "https://cryptonews.net/ru/news/feed/": "ru",
@@ -26,7 +26,6 @@ RSS_FEEDS = {
     "https://decrypt.co/feed": "en"
 }
 
-# === ЗАГРУЗКА ИСТОРИИ ===
 if os.path.exists(SENT_FILE):
     with open(SENT_FILE, "r") as f:
         sent_links = set(json.load(f))
@@ -35,7 +34,6 @@ else:
 
 sent_titles = []
 
-# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 def save_sent():
     with open(SENT_FILE, "w") as f:
         json.dump(list(sent_links), f)
@@ -59,16 +57,15 @@ def translate_text(text):
         res = resp.json()
         return res["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        print("[Ошибка перевода]", e)
+        print("[Translation error]", e)
         return text
 
 def is_similar(title, sent_titles, threshold=0.85):
-    for old in sent_titles:
-        if SequenceMatcher(None, title.lower(), old.lower()).ratio() > threshold:
+    for old_title in sent_titles:
+        if SequenceMatcher(None, title.lower(), old_title.lower()).ratio() > threshold:
             return True
     return False
 
-# === ОТПРАВКА НОВОСТЕЙ ===
 def send_news_to_channel(context: CallbackContext):
     global sent_titles
     for url, lang in RSS_FEEDS.items():
@@ -88,23 +85,23 @@ def send_news_to_channel(context: CallbackContext):
                 if len(sent_titles) > 50:
                     sent_titles.pop(0)
         except Exception as e:
-            print(f"[Ошибка RSS] {url}: {e}")
+            print(f"[RSS error] {url}: {e}")
     save_sent()
 
-# === ОБРАБОТЧИКИ КОМАНД ===
 def start(update: Update, context: CallbackContext):
-    update.message.reply_text("👋 Привет! Я публикую свежие крипто-новости в канал.")
+    update.message.reply_text("👋 Привет! Я публикую крипто-новости в канал.")
 
 def help_command(update: Update, context: CallbackContext):
-    update.message.reply_text("/start — запуск\n/help — помощь\n/news — вручную отправить новости")
+    update.message.reply_text("/start — запустить\n/help — команды\n/news — отправить новости вручную")
 
 def handle_news(update: Update, context: CallbackContext):
-    update.message.reply_text("🔄 Проверяю новости...")
+    update.message.reply_text("🔄 Проверяю ленты...")
     send_news_to_channel(context)
-    update.message.reply_text("✅ Новости отправлены!")
+    update.message.reply_text("✅ Новости отправлены.")
 
-# === ЗАПУСК БОТА ===
+# === WEBHOOK MAIN ===
 def main():
+    PORT = int(os.environ.get("PORT", 8443))
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
     dp = updater.dispatcher
 
@@ -112,10 +109,16 @@ def main():
     dp.add_handler(CommandHandler("help", help_command))
     dp.add_handler(CommandHandler("news", handle_news))
 
+    updater.start_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=f"{APP_URL}/{TELEGRAM_TOKEN}"
+    )
+
     updater.job_queue.run_repeating(send_news_to_channel, interval=CHECK_INTERVAL, first=5)
 
-    print("🤖 Бот запущен и работает!")
-    updater.start_polling()
+    print("🤖 Бот запущен через Webhook.")
     updater.idle()
 
 if __name__ == "__main__":
