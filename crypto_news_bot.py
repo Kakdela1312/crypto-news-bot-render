@@ -1,184 +1,118 @@
+from telegram.ext import Updater, CommandHandler, CallbackContext
+from telegram import Update
 import feedparser
-import telegram
-from telegram.ext import Updater, CommandHandler
-import time
 import json
 import os
 import requests
-from datetime import datetime
-from bs4 import BeautifulSoup
-from openai import OpenAI
-import tradingeconomics as te
-import threading
 import re
+from difflib import SequenceMatcher
 
-# === НАСТРОЙКИ ===
-TELEGRAM_TOKEN = "8106822791:AAFpNW8FHJZOmJ8HwCgBHeC9gQ5NOnvAdLc"
-TELEGRAM_CHANNEL = "@AYE_ZHIZN_VORAM1312"
-OPENAI_API_KEY = "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"
-TE_API_KEY = "300d469a2fe04f2:7vk6trdkoxhwpak"
-CHECK_INTERVAL = 600
-SENT_FILE = "sent_combined_news.json"
+import logging
+logging.basicConfig(level=logging.INFO)
 
-client = OpenAI(api_key=OPENAI_API_KEY)
-bot = telegram.Bot(token=TELEGRAM_TOKEN)
-te.login(TE_API_KEY)
+# === НАСТРОЙКИ через переменные окружения ===
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHANNEL = os.environ.get("TELEGRAM_CHANNEL")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+SENT_FILE = "sent_links.json"
+CHECK_INTERVAL = 600  # 10 минут
 
-RUSSIAN_FEEDS = [
-    "https://forklog.com/feed",
-    "https://bits.media/rss/news/",
-    "https://ru.ihodl.com/rss/",
-    "https://cryptonews.net/ru/news/feed/",
-    "https://coinjournal.net/ru/news/feed/",
-    "https://ru.cointelegraph.com/rss",
-    "https://bitnovosti.com/feed/",
-    "https://beincrypto.ru/feed/",
-    "https://ru.investing.com/rss/news_301.rss",
-    "https://banki.ru/news/feed/",
-    "https://www.finanz.ru/rss",
-    "https://www.vedomosti.ru/rss/news",
-    "https://www.rbc.ru/rss/newsline.xml",
-    "https://tass.ru/rss/v2.xml",
-    "https://cryptorating.ru/rss",
-    "https://www.crypto-ratings.ru/rss",
-    "https://tjournal.ru/rss/crypto",
-    "https://www.cnews.ru/tools/rss/cryptocurrency.xml",
-    "https://vc.ru/rss/tags/crypto",
-    "https://finam.ru/rss/news/crypto.xml",
-    "https://www.banki.ru/news/rss/",
-    "https://www.finversia.ru/rss",
-    "https://www.kommersant.ru/RSS/news.xml",
-    "https://www.rbc.ru/rss/crypto.xml",
-    "https://www.forbes.ru/rss",
-    "https://www.vedomosti.ru/rss/crypto",
-    "https://www.interfax.ru/rss/crypto"
-]
+RSS_FEEDS = {
+    "https://forklog.com/feed": "ru",
+    "https://cryptonews.net/ru/news/feed/": "ru",
+    "https://cointelegraph.com/rss": "en",
+    "https://www.newsbtc.com/feed/": "en",
+    "https://decrypt.co/feed": "en"
+}
 
-RSS_FEEDS = RUSSIAN_FEEDS + [
-    "https://cointelegraph.com/rss",
-    "https://www.newsbtc.com/feed/",
-    "https://bitcoinmagazine.com/.rss/full/",
-    "https://decrypt.co/feed",
-    "https://www.theblock.co/feeds/rss",
-    "https://cryptopotato.com/feed/",
-    "https://cryptoslate.com/feed/",
-    "https://coinspot.io/feed",
-]
-
-CRYPTO_KEYWORDS = [
-    "крипто", "биткоин", "bitcoin", "эфириум", "ethereum", "blockchain", "децентрализованный", 
-    "defi", "nft", "токен", "майнинг", "биткоин-etf", "кошелёк", "блокчейн", "coin", "crypto", 
-    "staking", "exchange", "solana", "binance", "bnb", "decentralized", "btc", "eth", "doge", "ada",
-    "ripple", "polkadot", "solidity", "dex", "layer 2", "tokenomics", "airdrops", "web3", "metaverse",
-    "hashrate", "fork", "smart contract", "wallet", "ledger", "cryptocurrency"
-]
-
-def is_silent_hours():
-    h = datetime.now().hour
-    return h >= 22 or h < 9
-
-def needs_translation(text):
-    # Если есть латинские буквы, считаем нужным перевод
-    return bool(re.search(r'[a-zA-Z]', text))
-
-def contains_crypto_keyword(text):
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in CRYPTO_KEYWORDS)
-
-def translate_text(text):
-    try:
-        print(f"[Запрос на перевод] {text}")
-        res = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": f"Переведи на русский заголовок крипто-новости: {text}"}],
-            max_tokens=100,
-            temperature=0.3
-        )
-        translated = res.choices[0].message.content.strip()
-        print(f"[Переведено] {translated}")
-        return translated
-    except Exception as e:
-        print("[Ошибка перевода]", e)
-        return text
-
-def send_news(title, link, source_url, tag="📰"):
-    if is_silent_hours():
-        print("[Тихо] Пропущено:", title)
-        return False
-    if not contains_crypto_keyword(title):
-        print("[Фильтр] Пропущено (нет ключевых слов):", title)
-        return False
-    if link not in sent_links:
-        try:
-            if source_url not in RUSSIAN_FEEDS:
-                if needs_translation(title):
-                    print(f"[Перевод заголовка] {title}")
-                    title = translate_text(title)
-            msg = f"{tag} <b>{title}</b>\n{link}"
-            bot.send_message(chat_id=TELEGRAM_CHANNEL, text=msg, parse_mode="HTML")
-            sent_links.add(link)
-            return True
-        except Exception as e:
-            print("[Ошибка отправки]", e)
-    return False
-
-def save_sent():
-    with open(SENT_FILE, "w") as f:
-        json.dump(list(sent_links), f)
-
-def check_rss():
-    updated = False
-    for url in RSS_FEEDS:
-        try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:1]:
-                if send_news(entry.title, entry.link, url, "📰"):
-                    updated = True
-        except Exception as e:
-            print("[RSS ошибка]", url, e)
-    return updated
-
-def start_news_loop():
-    while True:
-        check_rss()
-        save_sent()
-        time.sleep(CHECK_INTERVAL)
-
-def handle_digest(update, context): 
-    pass
-def handle_calendar(update, context): 
-    pass
-def handle_analytics(update, context): 
-    pass
-def handle_news(update, context): 
-    check_rss()
-def handle_help(update, context):
-    help_text = (
-        "/digest – Утренняя сводка\n"
-        "/calendar – Финансовый календарь\n"
-        "/analytics – Инфокартинки\n"
-        "/news – Принудительная проверка новостей\n"
-        "/help – Список команд"
-    )
-    context.bot.send_message(chat_id=update.effective_chat.id, text=help_text)
-
+# Загружаем отправленные ссылки
 if os.path.exists(SENT_FILE):
     with open(SENT_FILE, "r") as f:
         sent_links = set(json.load(f))
 else:
     sent_links = set()
 
-if __name__ == "__main__":
-    threading.Thread(target=start_news_loop, daemon=True).start()
+sent_titles = []
+
+def save_sent():
+    with open(SENT_FILE, "w") as f:
+        json.dump(list(sent_links), f)
+
+def needs_translation(text):
+    return bool(re.search(r'[a-zA-Z]', text))
+
+def translate_text(text):
+    try:
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": f"Переведи на русский язык заголовок крипто-новости: {text}"}],
+            "max_tokens": 100,
+            "temperature": 0.3
+        }
+        resp = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
+        res = resp.json()
+        return res["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        print("[Ошибка перевода]", e)
+        return text
+
+def is_similar(title, sent_titles, threshold=0.85):
+    for old_title in sent_titles:
+        if SequenceMatcher(None, title.lower(), old_title.lower()).ratio() > threshold:
+            return True
+    return False
+
+def send_news_to_channel(context: CallbackContext):
+    global sent_titles
+    for url, lang in RSS_FEEDS.items():
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:1]:
+                title = entry.title
+                link = entry.link
+                if link in sent_links or is_similar(title, sent_titles):
+                    continue
+                if lang == "en" and needs_translation(title):
+                    title = translate_text(title)
+                msg = f"📰 <b>{title}</b>\n{link}"
+                context.bot.send_message(chat_id=TELEGRAM_CHANNEL, text=msg, parse_mode="HTML")
+                sent_links.add(link)
+                sent_titles.append(title)
+                if len(sent_titles) > 50:
+                    sent_titles.pop(0)
+        except Exception as e:
+            print(f"[RSS ошибка] {url}: {e}")
+    save_sent()
+
+# === Команды ===
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text("👋 Привет! Я публикую свежие крипто-новости в канал.")
+
+def help_command(update: Update, context: CallbackContext):
+    update.message.reply_text("/start — запуск\n/help — команды\n/новости — вручную отправить ленты")
+
+def handle_news(update: Update, context: CallbackContext):
+    update.message.reply_text("🔄 Проверяю новости...")
+    send_news_to_channel(context)
+    update.message.reply_text("✅ Новости отправлены.")
+
+def main():
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
     dp = updater.dispatcher
 
-    dp.add_handler(CommandHandler("digest", handle_digest))
-    dp.add_handler(CommandHandler("calendar", handle_calendar))
-    dp.add_handler(CommandHandler("analytics", handle_analytics))
-    dp.add_handler(CommandHandler("news", handle_news))
-    dp.add_handler(CommandHandler("help", handle_help))
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("help", help_command))
+    dp.add_handler(CommandHandler("новости", handle_news))
 
-    print("🤖 Бот с улучшенным переводом запущен.")
+    updater.job_queue.run_repeating(send_news_to_channel, interval=CHECK_INTERVAL, first=5)
+
+    print("🤖 Бот с переводом и фильтром запущен.")
     updater.start_polling()
     updater.idle()
+
+if __name__ == "__main__":
+    main()
