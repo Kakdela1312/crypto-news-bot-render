@@ -134,14 +134,11 @@ def handle_analytics(update, context): send_infographics()
 def handle_news(update, context): check_rss()
 def handle_help(update, context):
     help_text = (
-        "/сводка – Утренняя сводка
-"
-        "/календарь – Финансовый календарь
-"
-        "/аналитика – Инфокартинки
-"
-        "/новости – Принудительная проверка новостей
-"
+        "/сводка – Утренняя сводка"
+
+        "/календарь – Финансовый календарь"
+        "/аналитика – Инфокартинки"
+        "/новости – Принудительная проверка новостей"
         "/помощь – Список команд"
     )
     context.bot.send_message(chat_id=update.effective_chat.id, text=help_text)
