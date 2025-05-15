@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 import tradingeconomics as te
 import threading
+import re
 
 # === НАСТРОЙКИ ===
 TELEGRAM_TOKEN = "8106822791:AAFpNW8FHJZOmJ8HwCgBHeC9gQ5NOnvAdLc"
@@ -77,7 +78,8 @@ def is_silent_hours():
     return h >= 22 or h < 9
 
 def needs_translation(text):
-    return sum(1 for c in text.lower() if c in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя') < 3
+    # Если есть латинские буквы, считаем нужным перевод
+    return bool(re.search(r'[a-zA-Z]', text))
 
 def contains_crypto_keyword(text):
     text_lower = text.lower()
@@ -85,13 +87,16 @@ def contains_crypto_keyword(text):
 
 def translate_text(text):
     try:
+        print(f"[Запрос на перевод] {text}")
         res = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": f"Переведи на русский заголовок крипто-новости: {text}"}],
             max_tokens=100,
             temperature=0.3
         )
-        return res.choices[0].message.content.strip()
+        translated = res.choices[0].message.content.strip()
+        print(f"[Переведено] {translated}")
+        return translated
     except Exception as e:
         print("[Ошибка перевода]", e)
         return text
@@ -105,8 +110,10 @@ def send_news(title, link, source_url, tag="📰"):
         return False
     if link not in sent_links:
         try:
-            if source_url not in RUSSIAN_FEEDS and needs_translation(title):
-                title = translate_text(title)
+            if source_url not in RUSSIAN_FEEDS:
+                if needs_translation(title):
+                    print(f"[Перевод заголовка] {title}")
+                    title = translate_text(title)
             msg = f"{tag} <b>{title}</b>\n{link}"
             bot.send_message(chat_id=TELEGRAM_CHANNEL, text=msg, parse_mode="HTML")
             sent_links.add(link)
@@ -172,6 +179,6 @@ if __name__ == "__main__":
     dp.add_handler(CommandHandler("news", handle_news))
     dp.add_handler(CommandHandler("help", handle_help))
 
-    print("🤖 Бот с фильтром по крипто ключевым словам запущен.")
+    print("🤖 Бот с улучшенным переводом запущен.")
     updater.start_polling()
     updater.idle()
