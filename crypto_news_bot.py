@@ -145,7 +145,8 @@ def handle_help(update, context):
 
 RSS_FEEDS = [
     "https://forklog.com/feed", "https://bits.media/rss/news/", "https://ru.ihodl.com/rss/",
-    "https://cryptonews.net/ru/news/feed/", " "https://cointelegraph.com/rss"
+    "https://cryptonews.net/ru/news/feed/", "https://cointelegraph.com/rss"
+
 ]
 
 if os.path.exists(SENT_FILE):
