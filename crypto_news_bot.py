@@ -23,7 +23,6 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 te.login(TE_API_KEY)
 
-# Русские RSS ленты
 RUSSIAN_FEEDS = [
     "https://forklog.com/feed",
     "https://bits.media/rss/news/",
@@ -54,7 +53,6 @@ RUSSIAN_FEEDS = [
     "https://www.interfax.ru/rss/crypto"
 ]
 
-# Все RSS ленты для чтения
 RSS_FEEDS = RUSSIAN_FEEDS + [
     "https://cointelegraph.com/rss",
     "https://www.newsbtc.com/feed/",
@@ -66,12 +64,24 @@ RSS_FEEDS = RUSSIAN_FEEDS + [
     "https://coinspot.io/feed",
 ]
 
+CRYPTO_KEYWORDS = [
+    "крипто", "биткоин", "bitcoin", "эфириум", "ethereum", "blockchain", "децентрализованный", 
+    "defi", "nft", "токен", "майнинг", "биткоин-etf", "кошелёк", "блокчейн", "coin", "crypto", 
+    "staking", "exchange", "solana", "binance", "bnb", "decentralized", "btc", "eth", "doge", "ada",
+    "ripple", "polkadot", "solidity", "dex", "layer 2", "tokenomics", "airdrops", "web3", "metaverse",
+    "hashrate", "fork", "smart contract", "wallet", "ledger", "cryptocurrency"
+]
+
 def is_silent_hours():
     h = datetime.now().hour
     return h >= 22 or h < 9
 
 def needs_translation(text):
     return sum(1 for c in text.lower() if c in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя') < 3
+
+def contains_crypto_keyword(text):
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in CRYPTO_KEYWORDS)
 
 def translate_text(text):
     try:
@@ -90,9 +100,11 @@ def send_news(title, link, source_url, tag="📰"):
     if is_silent_hours():
         print("[Тихо] Пропущено:", title)
         return False
+    if not contains_crypto_keyword(title):
+        print("[Фильтр] Пропущено (нет ключевых слов):", title)
+        return False
     if link not in sent_links:
         try:
-            # Переводить, только если источник не из русских
             if source_url not in RUSSIAN_FEEDS and needs_translation(title):
                 title = translate_text(title)
             msg = f"{tag} <b>{title}</b>\n{link}"
@@ -126,13 +138,10 @@ def start_news_loop():
         time.sleep(CHECK_INTERVAL)
 
 def handle_digest(update, context): 
-    # сюда можно добавить логику сводки
     pass
 def handle_calendar(update, context): 
-    # сюда можно добавить логику календаря
     pass
 def handle_analytics(update, context): 
-    # сюда можно добавить логику аналитики
     pass
 def handle_news(update, context): 
     check_rss()
@@ -163,6 +172,6 @@ if __name__ == "__main__":
     dp.add_handler(CommandHandler("news", handle_news))
     dp.add_handler(CommandHandler("help", handle_help))
 
-    print("🤖 Бот с переводом заголовков запущен.")
+    print("🤖 Бот с фильтром по крипто ключевым словам запущен.")
     updater.start_polling()
     updater.idle()
