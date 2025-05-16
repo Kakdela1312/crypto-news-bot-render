@@ -10,8 +10,8 @@ from openai import OpenAI
 import tradingeconomics as te
 from telegram.ext import Updater, CommandHandler
 
-# ✅ Токены и настройки
-TELEGRAM_TOKEN = "8106822791:AAFH0AjwyRES3LWmPQLNPPew37qB3kMv_2Q"
+# Конфигурация
+TELEGRAM_TOKEN = "8165550696:AAFTSgRStivlcC0xlFgOiApubOl6VZJkWHk"
 TELEGRAM_CHANNEL = "@AYE_ZHIZN_VORAM1312"
 OPENAI_API_KEY = "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"
 TE_API_KEY = "300d469a2fe04f2:7vk6trdkoxhwpak"
@@ -23,7 +23,10 @@ bot = telegram.Bot(token=TELEGRAM_TOKEN)
 client = OpenAI(api_key=OPENAI_API_KEY)
 te.login(TE_API_KEY)
 
-KEYWORDS = ["bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "binance", "airdrop", "token", "altcoin", "dex", "defi", "nft", "wallet", "solana", "sol", "cardano", "ada", "polygon", "matic"]
+KEYWORDS = [
+    "bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "binance", "airdrop", 
+    "token", "altcoin", "dex", "defi", "nft", "wallet", "solana", "sol", "cardano", "ada", "polygon", "matic"
+]
 
 RSS_FEEDS = [
     "https://forklog.com/feed",
@@ -46,13 +49,12 @@ def translate_text(text):
     try:
         res = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": f"Переведи на русский заголовок крипто-новости: {text}"}],
+            messages=[{"role": "user", "content": f"Переведи на русский: {text}"}],
             max_tokens=100,
             temperature=0.3
         )
         return res.choices[0].message.content.strip()
-    except Exception as e:
-        print("Ошибка перевода:", e)
+    except:
         return text
 
 def contains_keywords(text):
@@ -82,7 +84,7 @@ def check_rss(sent_links):
     for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:1]:
+            for entry in feed.entries[:2]:
                 if entry.link not in sent_links:
                     if send_news(entry.title, entry.link):
                         sent_links.add(entry.link)
@@ -93,7 +95,7 @@ def check_rss(sent_links):
         save_sent(sent_links)
 
 def handle_help(update, context):
-    update.message.reply_text("/help – список команд\n/news – проверить новости")
+    update.message.reply_text("/help – список команд\n/news – новости вручную")
 
 def handle_news(update, context):
     check_rss(sent_links)
@@ -115,6 +117,7 @@ def main():
     print("✅ Бот запущен.")
     updater.start_polling()
 
+    # фоновая проверка каждые 10 минут
     while True:
         check_rss(sent_links)
         time.sleep(CHECK_INTERVAL)
