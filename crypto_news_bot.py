@@ -1,125 +1,124 @@
-from telegram.ext import Updater, CommandHandler, CallbackContext
-from telegram import Update
-import feedparser
-import json
 import os
+import json
+import time
+import feedparser
+import telegram
+from bs4 import BeautifulSoup
 import requests
-import re
-from difflib import SequenceMatcher
-import logging
+from datetime import datetime
+from openai import OpenAI
+import tradingeconomics as te
+from telegram.ext import Updater, CommandHandler
 
-logging.basicConfig(level=logging.INFO)
+# Получение переменных из окружения
+TELEGRAM_TOKEN = "8106822791:AAFpNW8FHJZOmJ8HwCgBHeC9gQ5NOnvAdLc"
+TELEGRAM_CHANNEL = "@AYE_ZHIZN_VORAM1312"
+OPENAI_API_KEY = "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"
+TE_API_KEY = "300d469a2fe04f2:7vk6trdkoxhwpak"
 
-# === ОКРУЖЕНИЕ ===
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_CHANNEL = os.environ.get("TELEGRAM_CHANNEL")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-APP_URL = os.environ.get("APP_URL")  # https://your-bot.onrender.com
-SENT_FILE = "sent_links.json"
-CHECK_INTERVAL = 600  # 10 минут
+CHECK_INTERVAL = 600
+SENT_FILE = "sent_combined_news.json"
 
-RSS_FEEDS = {
-    "https://forklog.com/feed": "ru",
-    "https://cryptonews.net/ru/news/feed/": "ru",
-    "https://cointelegraph.com/rss": "en",
-    "https://www.newsbtc.com/feed/": "en",
-    "https://decrypt.co/feed": "en"
-}
+bot = telegram.Bot(token=TELEGRAM_TOKEN)
+client = OpenAI(api_key=OPENAI_API_KEY)
+te.login(TE_API_KEY)
 
-if os.path.exists(SENT_FILE):
-    with open(SENT_FILE, "r") as f:
-        sent_links = set(json.load(f))
-else:
-    sent_links = set()
+# Фильтруем только крипто-новости по ключевым словам
+KEYWORDS = ["bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "binance", "airdrop", "token", "altcoin", "dex", "defi", "nft", "wallet", "solana", "sol", "cardano", "ada", "polygon", "matic"]
 
-sent_titles = []
+RSS_FEEDS = [
+    "https://forklog.com/feed",
+    "https://cryptonews.net/ru/news/feed/",
+    "https://cointelegraph.com/rss",
+    "https://www.newsbtc.com/feed/",
+    "https://decrypt.co/feed",
+    "https://cryptopotato.com/feed/",
+    "https://www.coindesk.com/arc/outboundfeeds/rss/"
+]
 
-def save_sent():
-    with open(SENT_FILE, "w") as f:
-        json.dump(list(sent_links), f)
+def is_silent_hours():
+    h = datetime.now().hour
+    return h >= 23 or h < 7
 
 def needs_translation(text):
-    return bool(re.search(r'[a-zA-Z]', text))
+    return sum(1 for c in text.lower() if c in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя') < 3
 
 def translate_text(text):
     try:
-        headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": "gpt-3.5-turbo",
-            "messages": [{"role": "user", "content": f"Translate this crypto news headline to Russian: {text}"}],
-            "max_tokens": 100,
-            "temperature": 0.3
-        }
-        resp = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
-        res = resp.json()
-        return res["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print("[Translation error]", e)
+        res = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": f"Переведи на русский: {text}"}],
+            max_tokens=100,
+            temperature=0.3
+        )
+        return res.choices[0].message.content.strip()
+    except:
         return text
 
-def is_similar(title, sent_titles, threshold=0.85):
-    for old_title in sent_titles:
-        if SequenceMatcher(None, title.lower(), old_title.lower()).ratio() > threshold:
-            return True
+def contains_keywords(text):
+    return any(k.lower() in text.lower() for k in KEYWORDS)
+
+def send_news(title, link):
+    if not contains_keywords(title):
+        return False
+    if is_silent_hours():
+        return False
+    if needs_translation(title):
+        title = translate_text(title)
+    msg = f"📰 <b>{title}</b>\n{link}"
+    try:
+        bot.send_message(chat_id=TELEGRAM_CHANNEL, text=msg, parse_mode="HTML")
+        return True
+    except Exception as e:
+        print("[Ошибка отправки]", e)
     return False
 
-def send_news_to_channel(context: CallbackContext):
-    global sent_titles
-    for url, lang in RSS_FEEDS.items():
+def save_sent(sent_links):
+    with open(SENT_FILE, "w") as f:
+        json.dump(list(sent_links), f)
+
+def check_rss(sent_links):
+    updated = False
+    for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:1]:
-                title = entry.title
-                link = entry.link
-                if link in sent_links or is_similar(title, sent_titles):
-                    continue
-                if lang == "en" and needs_translation(title):
-                    title = translate_text(title)
-                msg = f"📰 <b>{title}</b>\n{link}"
-                context.bot.send_message(chat_id=TELEGRAM_CHANNEL, text=msg, parse_mode="HTML")
-                sent_links.add(link)
-                sent_titles.append(title)
-                if len(sent_titles) > 50:
-                    sent_titles.pop(0)
+                if entry.link not in sent_links:
+                    if send_news(entry.title, entry.link):
+                        sent_links.add(entry.link)
+                        updated = True
         except Exception as e:
-            print(f"[RSS error] {url}: {e}")
-    save_sent()
+            print("[Ошибка RSS]", url, e)
+    if updated:
+        save_sent(sent_links)
 
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text("👋 Привет! Я публикую крипто-новости в канал.")
+def handle_help(update, context):
+    update.message.reply_text("/help – список команд\n/news – новости вручную")
 
-def help_command(update: Update, context: CallbackContext):
-    update.message.reply_text("/start — запустить\n/help — команды\n/news — отправить новости вручную")
+def handle_news(update, context):
+    check_rss(sent_links)
 
-def handle_news(update: Update, context: CallbackContext):
-    update.message.reply_text("🔄 Проверяю ленты...")
-    send_news_to_channel(context)
-    update.message.reply_text("✅ Новости отправлены.")
-
-# === WEBHOOK MAIN ===
 def main():
-    PORT = int(os.environ.get("PORT", 8443))
+    global sent_links
+    if os.path.exists(SENT_FILE):
+        with open(SENT_FILE, "r") as f:
+            sent_links = set(json.load(f))
+    else:
+        sent_links = set()
+
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
     dp = updater.dispatcher
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_command))
+    dp.add_handler(CommandHandler("help", handle_help))
     dp.add_handler(CommandHandler("news", handle_news))
 
-    updater.start_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TELEGRAM_TOKEN,
-        webhook_url=f"{APP_URL}/{TELEGRAM_TOKEN}"
-    )
+    print("✅ Бот запущен.")
+    updater.start_polling()
 
-    updater.job_queue.run_repeating(send_news_to_channel, interval=CHECK_INTERVAL, first=5)
-
-    print("🤖 Бот запущен через Webhook.")
-    updater.idle()
+    # фоновая проверка каждые 10 минут
+    while True:
+        check_rss(sent_links)
+        time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
     main()
