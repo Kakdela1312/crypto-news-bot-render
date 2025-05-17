@@ -10,8 +10,7 @@ from openai import OpenAI
 import tradingeconomics as te
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
-import threading
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 # === КОНФИГ ===
 TOKEN = "8165550696:AAFTSgRStivlcC0xlFgOiApubOl6VZJkWHk"
@@ -23,37 +22,30 @@ bot = telegram.Bot(token=TOKEN)
 client = OpenAI(api_key=OPENAI_API_KEY)
 te.login(TE_API_KEY)
 
+timezone = pytz.timezone("Europe/Sofia")
+
+# === ГЛОБАЛЬНЫЕ НАСТРОЙКИ ===
+settings = {
+    "autotranslate": True
+}
+
 # === КЛЮЧЕВЫЕ СЛОВА ===
-KEYWORDS = [
-    "bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "binance", "airdrop",
-    "token", "altcoin", "dex", "defi", "nft", "wallet", "solana", "sol",
-    "cardano", "ada", "polygon", "matic", "layer2", "staking", "airdrops", "dao",
-    "web3", "metaverse", "smart contracts", "mining", "hashrate", "block explorer",
-    "ledger", "cold wallet", "hot wallet", "gas fees", "stablecoin", "usdt",
-    "usdc", "tether", "block", "halving", "rug pull", "liquidity pool", "yield farming",
-    "governance token", "launchpad", "whitelist", "ico", "ido", "ieo", "security token",
-    "privacy coin", "zk rollup", "optimism", "arbitrum", "bsc", "evm", "oracle",
-    "chainlink", "l2", "on-chain", "off-chain", "market cap", "crypto exchange",
-    "tokenomics", "proof of stake", "proof of work", "hash function",
-    "decentralized finance", "cross-chain", "interoperability", "gas", "wrapped token",
-    "stable assets", "crypto wallet", "flash loan", "impermanent loss", "synthetic asset",
-    "staking pool", "validator", "bridge", "rollup", "governance", "token swap",
-    "cryptography", "public key", "private key", "hash", "trading bot", "volume",
-    "altseason", "bull run", "bear market", "token burn", "KYC", "smart contract audit"
-]
+KEYWORDS = ["bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "binance", "airdrop"]
 
 # === RSS-ИСТОЧНИКИ ===
-FEEDS = [...]  # Список уже включён ранее
+FEEDS = ["https://forklog.com/feed", "https://cointelegraph.com/rss"]
 
 SENT_FILE = "sent_links.json"
 app = Flask(__name__)
-scheduler = BackgroundScheduler(timezone=pytz.utc)
+scheduler = BackgroundScheduler(timezone=timezone)
 
-# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+# === ФУНКЦИИ ===
 def is_russian(text):
     return sum(c in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя' for c in text.lower()) > 3
 
 def translate(text):
+    if not settings["autotranslate"]:
+        return text
     try:
         res = client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -83,7 +75,7 @@ def check_feeds():
     for url in FEEDS:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:5]:
+            for entry in feed.entries:
                 title = entry.title
                 link = entry.link
                 if link not in sent and contains_keywords(title):
@@ -96,9 +88,8 @@ def check_feeds():
         except Exception as e:
             print("RSS error:", e)
 
-# === DIGEST ===
 def send_daily_digest():
-    today = date.today().strftime("%d.%m.%Y")
+    today = datetime.now(timezone).strftime("%d.%m.%Y")
     msg = f"🗓️ <b>Важное на день ({today}):</b>\n- Подробности обновятся позже..."
     try:
         with open("daily.png", "rb") as img:
@@ -107,7 +98,7 @@ def send_daily_digest():
         print("❌ Ошибка при отправке дневной сводки:", e)
 
 def send_weekly_digest():
-    today = date.today().strftime("%d.%m.%Y")
+    today = datetime.now(timezone).strftime("%d.%m.%Y")
     msg = f"📅 <b>Важное на неделю ({today}):</b>\n- Подробности обновятся позже..."
     try:
         with open("weekly.png", "rb") as img:
@@ -115,29 +106,55 @@ def send_weekly_digest():
     except Exception as e:
         print("❌ Ошибка при отправке недельной сводки:", e)
 
+def send_menu(chat_id):
+    keyboard = [
+        [InlineKeyboardButton("📥 Проверить новости", callback_data='check_news')],
+        [InlineKeyboardButton("📅 Сводка на неделю", callback_data='weekly_digest')],
+        [InlineKeyboardButton("🗓️ Сводка на день", callback_data='daily_digest')],
+        [InlineKeyboardButton("🔁 Перевод: " + ("ВКЛ" if settings["autotranslate"] else "ВЫКЛ"), callback_data='toggle_translate')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    bot.send_message(chat_id=chat_id, text="Выберите действие:", reply_markup=reply_markup)
+
+# === ЗАДАЧИ ===
 scheduler.add_job(send_daily_digest, trigger='cron', hour=7, minute=0)
 scheduler.add_job(send_weekly_digest, trigger='cron', day_of_week='mon', hour=7, minute=30)
 scheduler.add_job(check_feeds, 'interval', minutes=10)
 scheduler.start()
 
+# === ВЕБХУК ===
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = telegram.Update.de_json(request.get_json(force=True), bot)
-    if update.message and update.message.text:
-        text = update.message.text
-        if text == "/news":
-            threading.Thread(target=check_feeds).start()
-            bot.send_message(chat_id=update.message.chat.id, text="✅ Проверка запущена.")
-        elif text == "/help":
-            bot.send_message(chat_id=update.message.chat.id, text="/news — получить новости\n/help — помощь")
-        elif text == "/menu":
-            keyboard = [
-                [InlineKeyboardButton("🔍 Проверить новости", callback_data='check_news')],
-                [InlineKeyboardButton("📅 Сводка на день", callback_data='daily')],
-                [InlineKeyboardButton("🗓️ Сводка на неделю", callback_data='weekly')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            bot.send_message(chat_id=update.message.chat.id, text="📲 Выберите действие:", reply_markup=reply_markup)
+    if update.message:
+        if update.message.text == "/start":
+            send_menu(update.message.chat.id)
+        elif update.message.text == "/news":
+            check_feeds()
+            bot.send_message(chat_id=update.message.chat.id, text="✅ Новости отправлены.")
+        elif update.message.text == "/help":
+            bot.send_message(chat_id=update.message.chat.id, text="/news — получить новости\n/help — помощь\n/digest — сводка")
+        elif update.message.text == "/digest":
+            send_daily_digest()
+            send_weekly_digest()
+            bot.send_message(chat_id=update.message.chat.id, text="📌 Сводки отправлены.")
+
+    elif update.callback_query:
+        query = update.callback_query
+        if query.data == "check_news":
+            check_feeds()
+            query.answer("Проверка завершена")
+        elif query.data == "weekly_digest":
+            send_weekly_digest()
+            query.answer("Отправлена сводка на неделю")
+        elif query.data == "daily_digest":
+            send_daily_digest()
+            query.answer("Отправлена сводка на день")
+        elif query.data == "toggle_translate":
+            settings["autotranslate"] = not settings["autotranslate"]
+            query.answer("Автоперевод: " + ("ВКЛ" if settings["autotranslate"] else "ВЫКЛ"))
+            send_menu(query.message.chat.id)
+
     return "ok"
 
 @app.route("/")
