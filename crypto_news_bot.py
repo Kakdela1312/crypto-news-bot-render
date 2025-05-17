@@ -14,6 +14,7 @@ import pytz
 # === КОНФИГ ===
 TOKEN = "8165550696:AAFTSgRStivlcC0xlFgOiApubOl6VZJkWHk"
 CHANNEL = "@AYE_ZHIZN_VORAM1312"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 TE_API_KEY = "300d469a2fe04f2:7vk6trdkoxhwpak"
 
 bot = telegram.Bot(token=TOKEN)
