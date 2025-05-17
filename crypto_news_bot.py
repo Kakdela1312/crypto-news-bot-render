@@ -10,24 +10,27 @@ from openai import OpenAI
 import tradingeconomics as te
 from telegram.ext import Updater, CommandHandler
 
-# Конфигурация
+# === КОНФИГУРАЦИЯ ===
 TELEGRAM_TOKEN = "8165550696:AAFTSgRStivlcC0xlFgOiApubOl6VZJkWHk"
 TELEGRAM_CHANNEL = "@AYE_ZHIZN_VORAM1312"
 OPENAI_API_KEY = "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"
 TE_API_KEY = "300d469a2fe04f2:7vk6trdkoxhwpak"
-
-CHECK_INTERVAL = 600
 SENT_FILE = "sent_combined_news.json"
+CHECK_INTERVAL = 600
 
+# === ИНИЦИАЛИЗАЦИЯ ===
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 client = OpenAI(api_key=OPENAI_API_KEY)
 te.login(TE_API_KEY)
 
+# === СПИСОК КЛЮЧЕВЫХ СЛОВ ===
 KEYWORDS = [
     "bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "binance", "airdrop", 
-    "token", "altcoin", "dex", "defi", "nft", "wallet", "solana", "sol", "cardano", "ada", "polygon", "matic"
+    "token", "altcoin", "dex", "defi", "nft", "wallet", "solana", "sol", 
+    "cardano", "ada", "polygon", "matic", "layer2", "staking", "airdrops"
 ]
 
+# === RSS-КАНАЛЫ ===
 RSS_FEEDS = [
     "https://forklog.com/feed",
     "https://cryptonews.net/ru/news/feed/",
@@ -38,6 +41,7 @@ RSS_FEEDS = [
     "https://www.coindesk.com/arc/outboundfeeds/rss/"
 ]
 
+# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 def is_silent_hours():
     h = datetime.now().hour
     return h >= 23 or h < 7
@@ -45,20 +49,23 @@ def is_silent_hours():
 def needs_translation(text):
     return sum(1 for c in text.lower() if c in 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя') < 3
 
+def contains_keywords(text):
+    return any(k.lower() in text.lower() for k in KEYWORDS)
+
 def translate_text(text):
     try:
         res = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": f"Переведи на русский: {text}"}],
-            max_tokens=100,
+            messages=[
+                {"role": "user", "content": f"Переведи на русский заголовок крипто-новости: {text}"}
+            ],
+            max_tokens=60,
             temperature=0.3
         )
         return res.choices[0].message.content.strip()
-    except:
+    except Exception as e:
+        print("❌ Ошибка перевода:", e)
         return text
-
-def contains_keywords(text):
-    return any(k.lower() in text.lower() for k in KEYWORDS)
 
 def send_news(title, link):
     if not contains_keywords(title):
@@ -67,12 +74,13 @@ def send_news(title, link):
         return False
     if needs_translation(title):
         title = translate_text(title)
+
     msg = f"📰 <b>{title}</b>\n{link}"
     try:
         bot.send_message(chat_id=TELEGRAM_CHANNEL, text=msg, parse_mode="HTML")
         return True
     except Exception as e:
-        print("[Ошибка отправки]", e)
+        print("❌ Ошибка отправки:", e)
     return False
 
 def save_sent(sent_links):
@@ -84,22 +92,27 @@ def check_rss(sent_links):
     for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:2]:
+            for entry in feed.entries[:2]:  # по 2 новости с источника
                 if entry.link not in sent_links:
                     if send_news(entry.title, entry.link):
                         sent_links.add(entry.link)
                         updated = True
         except Exception as e:
-            print("[Ошибка RSS]", url, e)
+            print("❌ Ошибка RSS:", url, e)
     if updated:
         save_sent(sent_links)
 
+# === TELEGRAM КОМАНДЫ ===
 def handle_help(update, context):
-    update.message.reply_text("/help – список команд\n/news – новости вручную")
+    update.message.reply_text(
+        "/help – список команд\n/news – принудительная проверка новостей"
+    )
 
 def handle_news(update, context):
     check_rss(sent_links)
+    update.message.reply_text("✅ Проверка новостей завершена.")
 
+# === ОСНОВНОЙ ЦИКЛ ===
 def main():
     global sent_links
     if os.path.exists(SENT_FILE):
@@ -117,7 +130,6 @@ def main():
     print("✅ Бот запущен.")
     updater.start_polling()
 
-    # фоновая проверка каждые 10 минут
     while True:
         check_rss(sent_links)
         time.sleep(CHECK_INTERVAL)
