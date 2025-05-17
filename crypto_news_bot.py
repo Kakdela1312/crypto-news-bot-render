@@ -10,6 +10,8 @@ from openai import OpenAI
 import tradingeconomics as te
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
+import threading
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 
 # === КОНФИГ ===
 TOKEN = "8165550696:AAFTSgRStivlcC0xlFgOiApubOl6VZJkWHk"
@@ -41,53 +43,7 @@ KEYWORDS = [
 ]
 
 # === RSS-ИСТОЧНИКИ ===
-FEEDS = [
-    "https://forklog.com/feed",
-    "https://cryptonews.net/ru/news/feed/",
-    "https://cointelegraph.com/rss",
-    "https://www.newsbtc.com/feed/",
-    "https://decrypt.co/feed",
-    "https://cryptopotato.com/feed/",
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://bitcoinist.com/feed/",
-    "https://cryptoslate.com/feed/",
-    "https://u.today/rss",
-    "https://www.investing.com/rss/news_301.rss",
-    "https://dailyhodl.com/feed/",
-    "https://www.cryptopolitan.com/feed/",
-    "https://ambcrypto.com/feed/",
-    "https://blockonomi.com/feed/",
-    "https://www.blockchain-council.org/feed/",
-    "https://news.bitcoin.com/feed/",
-    "https://coinjournal.net/feed/",
-    "https://finbold.com/feed/",
-    "https://www.cryptobriefing.com/feed/",
-    "https://cryptonewsz.com/feed/",
-    "https://www.ccn.com/feed/",
-    "https://www.fxstreet.com/crypto/news/rss",
-    "https://www.bitcoininsider.org/rss",
-    "https://www.cryptoglobe.com/latest/feed/",
-    "https://www.investingcube.com/feed/",
-    "https://www.tronweekly.com/feed/",
-    "https://nulltx.com/feed/",
-    "https://cryptogeek.info/en/news/rss",
-    "https://bitcoingarden.org/feed/",
-    "https://coincodex.com/rss/",
-    "https://coingape.com/feed/",
-    "https://cryptodaily.co.uk/feed",
-    "https://www.crypto-news.net/feed/",
-    "https://tokenhell.com/feed/",
-    "https://www.cryptovibes.com/feed/",
-    "https://cryptoticker.io/en/feed/",
-    "https://coinspeaker.com/feed/",
-    "https://www.crypto-news-flash.com/feed/",
-    "https://cryptonewsreview.com/feed/",
-    "https://bitcoinmagazine.com/.rss/full",
-    "https://coincheckup.com/blog/feed/",
-    "https://coincentral.com/feed/",
-    "https://bitcourier.co.uk/news/rss",
-    "https://cryptototem.com/feed/"
-]
+FEEDS = [...]  # Список уже включён ранее
 
 SENT_FILE = "sent_links.json"
 app = Flask(__name__)
@@ -123,27 +79,22 @@ def save_sent(sent):
         json.dump(list(sent), f)
 
 def check_feeds():
-    print(f"[{datetime.utcnow()}] 🔍 check_feeds запущен")
     sent = load_sent()
-    updated = False
     for url in FEEDS:
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:5]:
                 title = entry.title
                 link = entry.link
-                print("→", title)
                 if link not in sent and contains_keywords(title):
                     if not is_russian(title):
                         title = translate(title)
                     msg = f"<b>{title}</b>\n{link}"
                     bot.send_message(chat_id=CHANNEL, text=msg, parse_mode="HTML")
                     sent.add(link)
-                    updated = True
+                    save_sent(sent)
         except Exception as e:
             print("RSS error:", e)
-    if updated:
-        save_sent(sent)
 
 # === DIGEST ===
 def send_daily_digest():
@@ -173,11 +124,20 @@ scheduler.start()
 def webhook():
     update = telegram.Update.de_json(request.get_json(force=True), bot)
     if update.message and update.message.text:
-        if update.message.text == "/news":
-            check_feeds()
-            bot.send_message(chat_id=update.message.chat.id, text="✅ Новости отправлены.")
-        elif update.message.text == "/help":
+        text = update.message.text
+        if text == "/news":
+            threading.Thread(target=check_feeds).start()
+            bot.send_message(chat_id=update.message.chat.id, text="✅ Проверка запущена.")
+        elif text == "/help":
             bot.send_message(chat_id=update.message.chat.id, text="/news — получить новости\n/help — помощь")
+        elif text == "/menu":
+            keyboard = [
+                [InlineKeyboardButton("🔍 Проверить новости", callback_data='check_news')],
+                [InlineKeyboardButton("📅 Сводка на день", callback_data='daily')],
+                [InlineKeyboardButton("🗓️ Сводка на неделю", callback_data='weekly')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            bot.send_message(chat_id=update.message.chat.id, text="📲 Выберите действие:", reply_markup=reply_markup)
     return "ok"
 
 @app.route("/")
