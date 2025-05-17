@@ -9,11 +9,13 @@ from flask import Flask, request
 from openai import OpenAI
 import tradingeconomics as te
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHANNEL = os.environ.get("TELEGRAM_CHANNEL")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-TE_API_KEY = os.environ.get("TE_API_KEY")
+# === Прямые значения ===
+TOKEN = "8165550696:AAFTSgRStivlcC0xlFgOiApubOl6VZJkWHk"
+CHANNEL = "@AYE_ZHIZN_VORAM1312"
+OPENAI_API_KEY = "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"
+TE_API_KEY = "300d469a2fe04f2:7vk6trdkoxhwpak"
 
+# === Инициализация клиентов ===
 bot = telegram.Bot(token=TOKEN)
 client = OpenAI(api_key=OPENAI_API_KEY)
 te.login(TE_API_KEY)
@@ -35,7 +37,6 @@ FEEDS = [
 ]
 
 SENT_FILE = "sent_links.json"
-
 app = Flask(__name__)
 
 def is_russian(text):
