@@ -22,10 +22,72 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 te.login(TE_API_KEY)
 
 # === КЛЮЧЕВЫЕ СЛОВА ===
-KEYWORDS = [...]
+KEYWORDS = [
+    "bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "binance", "airdrop",
+    "token", "altcoin", "dex", "defi", "nft", "wallet", "solana", "sol",
+    "cardano", "ada", "polygon", "matic", "layer2", "staking", "airdrops", "dao",
+    "web3", "metaverse", "smart contracts", "mining", "hashrate", "block explorer",
+    "ledger", "cold wallet", "hot wallet", "gas fees", "stablecoin", "usdt",
+    "usdc", "tether", "block", "halving", "rug pull", "liquidity pool", "yield farming",
+    "governance token", "launchpad", "whitelist", "ico", "ido", "ieo", "security token",
+    "privacy coin", "zk rollup", "optimism", "arbitrum", "bsc", "evm", "oracle",
+    "chainlink", "l2", "on-chain", "off-chain", "market cap", "crypto exchange",
+    "tokenomics", "proof of stake", "proof of work", "hash function",
+    "decentralized finance", "cross-chain", "interoperability", "gas", "wrapped token",
+    "stable assets", "crypto wallet", "flash loan", "impermanent loss", "synthetic asset",
+    "staking pool", "validator", "bridge", "rollup", "governance", "token swap",
+    "cryptography", "public key", "private key", "hash", "trading bot", "volume",
+    "altseason", "bull run", "bear market", "token burn", "KYC", "smart contract audit"
+]
 
 # === RSS-ИСТОЧНИКИ ===
-FEEDS = [...]
+FEEDS = [
+    "https://forklog.com/feed",
+    "https://cryptonews.net/ru/news/feed/",
+    "https://cointelegraph.com/rss",
+    "https://www.newsbtc.com/feed/",
+    "https://decrypt.co/feed",
+    "https://cryptopotato.com/feed/",
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://bitcoinist.com/feed/",
+    "https://cryptoslate.com/feed/",
+    "https://u.today/rss",
+    "https://www.investing.com/rss/news_301.rss",
+    "https://dailyhodl.com/feed/",
+    "https://www.cryptopolitan.com/feed/",
+    "https://ambcrypto.com/feed/",
+    "https://blockonomi.com/feed/",
+    "https://www.blockchain-council.org/feed/",
+    "https://news.bitcoin.com/feed/",
+    "https://coinjournal.net/feed/",
+    "https://finbold.com/feed/",
+    "https://www.cryptobriefing.com/feed/",
+    "https://cryptonewsz.com/feed/",
+    "https://www.ccn.com/feed/",
+    "https://www.fxstreet.com/crypto/news/rss",
+    "https://www.bitcoininsider.org/rss",
+    "https://www.cryptoglobe.com/latest/feed/",
+    "https://www.investingcube.com/feed/",
+    "https://www.tronweekly.com/feed/",
+    "https://nulltx.com/feed/",
+    "https://cryptogeek.info/en/news/rss",
+    "https://bitcoingarden.org/feed/",
+    "https://coincodex.com/rss/",
+    "https://coingape.com/feed/",
+    "https://cryptodaily.co.uk/feed",
+    "https://www.crypto-news.net/feed/",
+    "https://tokenhell.com/feed/",
+    "https://www.cryptovibes.com/feed/",
+    "https://cryptoticker.io/en/feed/",
+    "https://coinspeaker.com/feed/",
+    "https://www.crypto-news-flash.com/feed/",
+    "https://cryptonewsreview.com/feed/",
+    "https://bitcoinmagazine.com/.rss/full",
+    "https://coincheckup.com/blog/feed/",
+    "https://coincentral.com/feed/",
+    "https://bitcourier.co.uk/news/rss",
+    "https://cryptototem.com/feed/"
+]
 
 SENT_FILE = "sent_links.json"
 app = Flask(__name__)
@@ -61,14 +123,16 @@ def save_sent(sent):
         json.dump(list(sent), f)
 
 def check_feeds():
+    print(f"[{datetime.utcnow()}] 🔍 check_feeds запущен")
     sent = load_sent()
     updated = False
     for url in FEEDS:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:2]:
+            for entry in feed.entries[:5]:
                 title = entry.title
                 link = entry.link
+                print("→", title)
                 if link not in sent and contains_keywords(title):
                     if not is_russian(title):
                         title = translate(title)
